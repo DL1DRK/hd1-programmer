@@ -103,9 +103,30 @@ function zoneOffset(index) {
   return ZONE_TABLE_OFFSET + index * ZONE_RECORD_SIZE;
 }
 
+function assertZoneIndex(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= ZONE_SCAN_SLOTS) {
+    throw new TwError(`Ungültiger Zonenslot ${index}. Unterstützt werden 0 bis ${ZONE_SCAN_SLOTS - 1}.`);
+  }
+}
+
 function isAllFF(record) {
   for (const b of record) if (b !== 0xff) return false;
   return true;
+}
+
+export function isZoneSlotEmpty(payload, index) {
+  assertZoneIndex(index);
+  const offset = zoneOffset(index);
+  const record = payload.slice(offset, offset + ZONE_RECORD_SIZE);
+  return record.length === ZONE_RECORD_SIZE && isAllFF(record);
+}
+
+export function findFreeZoneSlot(payload, usedIndices = []) {
+  const used = new Set(usedIndices);
+  for (let index = 0; index < ZONE_SCAN_SLOTS; index++) {
+    if (!used.has(index) && isZoneSlotEmpty(payload, index)) return index;
+  }
+  return -1;
 }
 
 function decodeZoneName(raw) {
@@ -166,7 +187,7 @@ function encodeAsciiName(name) {
   for (const ch of name) {
     const code = ch.charCodeAt(0);
     if (code < 0x20 || code > 0x7e) {
-      throw new TwError('Version 0.1.0 erlaubt im Zonennamen nur druckbare ASCII-Zeichen.');
+      throw new TwError('Zonennamen dürfen nur druckbare ASCII-Zeichen enthalten.');
     }
     bytes.push(code);
   }
@@ -174,9 +195,7 @@ function encodeAsciiName(name) {
 }
 
 export function writeZone(payload, zone) {
-  if (!Number.isInteger(zone.index) || zone.index < 0 || zone.index >= ZONE_SCAN_SLOTS) {
-    throw new TwError('Ungültiger Zonenslot.');
-  }
+  assertZoneIndex(zone.index);
   if (!Array.isArray(zone.channels) || zone.channels.length > ZONE_CHANNEL_LIMIT) {
     throw new TwError(`Eine Zone darf höchstens ${ZONE_CHANNEL_LIMIT} Kanäle enthalten.`);
   }
@@ -209,8 +228,26 @@ export function writeZone(payload, zone) {
   payload.set(record, zoneOffset(zone.index));
 }
 
+export function clearZone(payload, index) {
+  assertZoneIndex(index);
+  payload.fill(0xff, zoneOffset(index), zoneOffset(index) + ZONE_RECORD_SIZE);
+}
+
 export function applyZones(payload, zones) {
   const result = payload.slice();
+  for (const zone of zones) writeZone(result, zone);
+  return result;
+}
+
+export function applyZoneChanges(payload, zones, originalZones = []) {
+  const result = payload.slice();
+  const currentIndices = new Set(zones.map(zone => zone.index));
+
+  // Nur zuvor belegte Zonenslots löschen. Andere RAW-Bereiche werden nicht angefasst.
+  for (const original of originalZones) {
+    if (!currentIndices.has(original.index)) clearZone(result, original.index);
+  }
+
   for (const zone of zones) writeZone(result, zone);
   return result;
 }
