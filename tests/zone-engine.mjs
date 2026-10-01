@@ -25,6 +25,7 @@ assert.equal(zones.length, 1);
 assert.equal(zones[0].name, 'TEST');
 assert.deepEqual(zones[0].channels, [1, 25, 67, 131]);
 
+// RAW .tw: payload + trailing 0 decode-pass byte.
 const rawTw = buildRawTw(payload);
 assert.equal(rawTw.length, RAW_PAYLOAD_SIZE + 1);
 assert.equal(rawTw.at(-1), 0);
@@ -33,6 +34,28 @@ const decoded = decodeTw(rawTw.buffer);
 assert.equal(decoded.passes, 0);
 assert.equal(decoded.zones.length, 1);
 assert.deepEqual(decoded.zones[0].channels, sourceZone.channels);
+
+// Synthetic one-pass Eliminator stream.
+// Control byte 0x20 emits literal 'S' and then special byte 'L', followed by
+// the remainder of the literal stream. The result must equal the RAW payload.
+const literalStream = new Uint8Array(RAW_PAYLOAD_SIZE - 1);
+literalStream[0] = payload[0];
+literalStream.set(payload.slice(2), 1);
+
+const encodedPass = new Uint8Array(8 + literalStream.length);
+encodedPass.set([0x00, 0x00, 0x05], 0); // literalStart = 5 + 3 = 8
+encodedPass[3] = payload[1];            // special byte = 'L'
+encodedPass.set([0x00, 0x00, 0x01], 4); // one special byte to emit
+encodedPass[7] = 0x20;                  // literal, special
+encodedPass.set(literalStream, 8);
+
+const compressedTw = new Uint8Array(encodedPass.length + 1);
+compressedTw.set(encodedPass, 0);
+compressedTw[compressedTw.length - 1] = 1;
+
+const decodedCompressed = decodeTw(compressedTw.buffer);
+assert.equal(decodedCompressed.passes, 1);
+assert.deepEqual(decodedCompressed.payload, payload);
 
 const maxZone = {
   index: 1,
