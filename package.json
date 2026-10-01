@@ -1,0 +1,9 @@
+{
+  "name": "hd1-programmer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/zone-engine.mjs"
+  }
+}
