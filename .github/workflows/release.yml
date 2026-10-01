@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION="$(tr -d '\r\n' < VERSION)"
+          if [ "$VERSION" != "$FILE_VERSION" ]; then
+            echo "Tag version $VERSION does not match VERSION file $FILE_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          npm test
+          php -l installer/install.php
+          php -l installer/update.php
+
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE="hd1-programmer-${VERSION}.zip"
+
+          rm -rf dist release
+          mkdir -p dist/admin release
+          cp -R app/. dist/
+          cp installer/update.php dist/admin/update.php
+          cp VERSION dist/VERSION
+          if [ -f LICENSE ]; then cp LICENSE dist/LICENSE; fi
+
+          (cd dist && zip -qr "../release/${PACKAGE}" .)
+          SHA256="$(sha256sum "release/${PACKAGE}" | awk '{print $1}')"
+
+          cat > release/manifest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "channel": "stable",
+            "package": "${PACKAGE}",
+            "sha256": "${SHA256}",
+            "min_php": "8.1",
+            "repository": "DL1DRK/hd1-programmer"
+          }
+          EOF
+
+          cp installer/install.php release/install.php
+          (cd release && sha256sum "${PACKAGE}" install.php manifest.json > SHA256SUMS)
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            release/* \
+            --title "HD1 Programmer $GITHUB_REF_NAME" \
+            --generate-notes
