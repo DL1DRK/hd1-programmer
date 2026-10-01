@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>HD1 Programmer</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">Ailunce HD1 Codeplug Editor</p>
+      <h1>HD1 Programmer</h1>
+      <p class="subtitle">Codeplugs lokal im Browser öffnen, Zonen bearbeiten und wieder als CPS-lesbare TW-Datei speichern.</p>
+    </div>
+    <div class="version-badge">v0.1.0</div>
+  </header>
+
+  <main>
+    <section class="notice warning">
+      <strong>Experimentell:</strong> Unterstützt derzeit Codeplugs der Ailunce HD1(GPS) CPS v3.05. Vor dem Schreiben ins Funkgerät die erzeugte Datei immer in der Original-CPS prüfen und ein Backup behalten.
+    </section>
+
+    <section class="card load-card">
+      <h2>Dateien</h2>
+      <div class="file-grid">
+        <label class="file-field">
+          <span>1. Codeplug (.tw)</span>
+          <input id="twFile" type="file" accept=".tw,application/octet-stream">
+          <small>Pflicht. Verarbeitung erfolgt ausschließlich lokal im Browser.</small>
+        </label>
+
+        <label class="file-field">
+          <span>2. Kanalliste (.csv)</span>
+          <input id="channelFile" type="file" accept=".csv,text/csv">
+          <small>Optional. Löst Kanalnummern in Alias, Frequenz und Typ auf.</small>
+        </label>
+
+        <label class="file-field">
+          <span>Zonen-CSV importieren</span>
+          <input id="zoneCsvFile" type="file" accept=".csv,text/csv" disabled>
+          <small>Optional. Erwartet den vom HD1 Programmer exportierten Aufbau.</small>
+        </label>
+      </div>
+
+      <div id="fileStatus" class="status-line">Noch kein Codeplug geladen.</div>
+    </section>
+
+    <section id="workspace" class="workspace hidden" aria-live="polite">
+      <aside class="card zones-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Codeplug</p>
+            <h2>Zonen</h2>
+          </div>
+          <span id="zoneTotal" class="counter">0</span>
+        </div>
+        <div id="zoneList" class="zone-list"></div>
+        <p class="small-note">Version 0.1.0 bearbeitet vorhandene Zonen. Das Anlegen neuer Zonenslots folgt nach weiterer Formatvalidierung.</p>
+      </aside>
+
+      <section class="card editor-panel">
+        <div id="noZone" class="empty-state">Zone auswählen.</div>
+
+        <div id="zoneEditor" class="hidden">
+          <div class="editor-header">
+            <div class="grow">
+              <label for="zoneName">Zonenname</label>
+              <input id="zoneName" type="text" maxlength="16" autocomplete="off">
+            </div>
+            <div class="count-box">
+              <span>Kanäle</span>
+              <strong id="zoneCount">0 / 64</strong>
+            </div>
+          </div>
+
+          <div class="section-heading">
+            <h3>Zugeordnete Kanäle</h3>
+            <span class="muted">Reihenfolge entspricht der Zone</span>
+          </div>
+          <div id="zoneChannels" class="channel-list"></div>
+
+          <div class="add-channel">
+            <div class="section-heading">
+              <h3>Kanal hinzufügen</h3>
+            </div>
+            <div class="add-grid">
+              <div>
+                <label for="channelSearch">Kanalliste durchsuchen</label>
+                <input id="channelSearch" type="search" placeholder="z. B. DB0HM oder 26275" disabled>
+                <div id="channelResults" class="search-results"></div>
+              </div>
+              <div>
+                <label for="channelNumber">oder Kanalnummer</label>
+                <div class="inline-input">
+                  <input id="channelNumber" type="number" min="1" max="65535" placeholder="25">
+                  <button id="addChannelNumber" type="button" class="secondary">Hinzufügen</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section id="actions" class="card actions hidden">
+      <div>
+        <h2>Ausgabe</h2>
+        <p>Die erzeugte TW-Datei wird als von der CPS lesbarer RAW-Codeplug mit 0 Decoder-Durchläufen gespeichert.</p>
+      </div>
+      <div class="button-row">
+        <button id="exportCsv" type="button" class="secondary">Zonen als CSV</button>
+        <button id="downloadTw" type="button" class="primary">Neue TW-Datei erzeugen</button>
+      </div>
+    </section>
+
+    <section id="messageBox" class="notice hidden" role="status"></section>
+  </main>
+
+  <footer>
+    <span>HD1 Programmer · AGPL-3.0-or-later</span>
+    <span>Inoffizielles Open-Source-Projekt · keine Verbindung zu oder Unterstützung durch Ailunce.</span>
+    <a href="https://github.com/DL1DRK/hd1-programmer" rel="noopener">Quellcode auf GitHub</a>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
