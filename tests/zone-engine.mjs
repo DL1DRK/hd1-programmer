@@ -6,7 +6,11 @@ import {
   writeZone,
   readZones,
   buildRawTw,
-  decodeTw
+  decodeTw,
+  isZoneSlotEmpty,
+  findFreeZoneSlot,
+  clearZone,
+  applyZoneChanges
 } from '../app/js/hd1tw.js';
 
 const payload = new Uint8Array(RAW_PAYLOAD_SIZE);
@@ -24,6 +28,9 @@ const zones = readZones(payload);
 assert.equal(zones.length, 1);
 assert.equal(zones[0].name, 'TEST');
 assert.deepEqual(zones[0].channels, [1, 25, 67, 131]);
+assert.equal(isZoneSlotEmpty(payload, 0), false);
+assert.equal(isZoneSlotEmpty(payload, 1), true);
+assert.equal(findFreeZoneSlot(payload, [0]), 1);
 
 // RAW .tw: payload + trailing 0 decode-pass byte.
 const rawTw = buildRawTw(payload);
@@ -65,5 +72,25 @@ const maxZone = {
 writeZone(payload, maxZone);
 const afterMax = readZones(payload);
 assert.equal(afterMax.find(z => z.index === 1).channels.length, 64);
+
+// Deleting an existing zone clears only its 145-byte record. Adding a new
+// zone writes into a previously empty slot and leaves the rest of the RAW
+// image untouched.
+const originalZones = readZones(payload);
+const editedZones = [
+  { ...sourceZone, name: 'RENAMED', channels: [1, 25, 131] },
+  { index: 2, name: 'NEWZONE', channels: [50, 51] }
+];
+const changed = applyZoneChanges(payload, editedZones, originalZones);
+const changedZones = readZones(changed);
+assert.deepEqual(changedZones.map(z => z.index), [0, 2]);
+assert.equal(changedZones[0].name, 'RENAMED');
+assert.deepEqual(changedZones[0].channels, [1, 25, 131]);
+assert.equal(isZoneSlotEmpty(changed, 1), true);
+assert.deepEqual(changedZones[1].channels, [50, 51]);
+
+const cleared = changed.slice();
+clearZone(cleared, 2);
+assert.equal(isZoneSlotEmpty(cleared, 2), true);
 
 console.log('HD1 zone engine tests passed.');
