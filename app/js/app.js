@@ -1,10 +1,13 @@
 import {
   TwError,
   decodeTw,
-  applyZones,
+  applyZoneChanges,
   buildRawTw,
   zonesToCsv,
-  ZONE_CHANNEL_LIMIT
+  ZONE_CHANNEL_LIMIT,
+  ZONE_SCAN_SLOTS,
+  findFreeZoneSlot,
+  isZoneSlotEmpty
 } from './hd1tw.js';
 import { parseChannelCsv, channelLabel, channelMeta, CsvError } from './channels.js';
 import { parseZoneCsv } from './zones.js';
@@ -18,6 +21,7 @@ const elements = {
   fileStatus: $('#fileStatus'),
   workspace: $('#workspace'),
   actions: $('#actions'),
+  changesCard: $('#changesCard'),
   zoneList: $('#zoneList'),
   zoneTotal: $('#zoneTotal'),
   noZone: $('#noZone'),
@@ -29,6 +33,11 @@ const elements = {
   channelResults: $('#channelResults'),
   channelNumber: $('#channelNumber'),
   addChannelNumber: $('#addChannelNumber'),
+  newZone: $('#newZone'),
+  deleteZone: $('#deleteZone'),
+  resetChanges: $('#resetChanges'),
+  changeSummary: $('#changeSummary'),
+  dirtyBadge: $('#dirtyBadge'),
   exportCsv: $('#exportCsv'),
   downloadTw: $('#downloadTw'),
   messageBox: $('#messageBox')
@@ -38,9 +47,11 @@ const state = {
   fileName: '',
   payload: null,
   passes: 0,
+  originalZones: [],
   zones: [],
   channelMap: new Map(),
-  selectedZoneIndex: null
+  selectedZoneIndex: null,
+  draggedPosition: null
 };
 
 function escapeHtml(value) {
@@ -71,6 +82,67 @@ function selectedZone() {
   return state.zones.find(zone => zone.index === state.selectedZoneIndex) ?? null;
 }
 
+function sameArray(a, b) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function collectChanges() {
+  const changes = [];
+  const before = new Map(state.originalZones.map(zone => [zone.index, zone]));
+  const after = new Map(state.zones.map(zone => [zone.index, zone]));
+
+  for (const zone of state.originalZones) {
+    if (!after.has(zone.index)) {
+      changes.push({ type: 'deleted', text: `Zone „${zone.name}“ gelöscht` });
+    }
+  }
+
+  for (const zone of state.zones) {
+    const original = before.get(zone.index);
+    if (!original) {
+      changes.push({ type: 'added', text: `Zone „${zone.name}“ neu angelegt (${zone.channels.length} Kanäle)` });
+      continue;
+    }
+
+    if (original.name !== zone.name) {
+      changes.push({ type: 'renamed', text: `Zone „${original.name}“ in „${zone.name}“ umbenannt` });
+    }
+
+    if (!sameArray(original.channels, zone.channels)) {
+      if (original.channels.length !== zone.channels.length) {
+        changes.push({
+          type: 'channels',
+          text: `Zone „${zone.name}“: ${original.channels.length} → ${zone.channels.length} Kanäle`
+        });
+      } else {
+        changes.push({ type: 'channels', text: `Zone „${zone.name}“: Kanalbelegung oder Reihenfolge geändert` });
+      }
+    }
+  }
+
+  return changes;
+}
+
+function renderChangeSummary() {
+  const changes = collectChanges();
+  const dirty = changes.length > 0;
+
+  elements.dirtyBadge.classList.toggle('hidden', !dirty);
+  elements.resetChanges.disabled = !dirty;
+
+  if (!dirty) {
+    elements.changeSummary.className = 'change-summary';
+    elements.changeSummary.textContent = 'Keine Änderungen am geladenen Codeplug.';
+    return;
+  }
+
+  elements.changeSummary.className = 'change-summary has-changes';
+  elements.changeSummary.innerHTML = `
+    <ul class="change-list">
+      ${changes.map(change => `<li>${escapeHtml(change.text)}</li>`).join('')}
+    </ul>`;
+}
+
 function renderZoneList() {
   elements.zoneTotal.textContent = String(state.zones.length);
   elements.zoneList.innerHTML = '';
@@ -94,7 +166,8 @@ function channelRowHtml(channel, position, count) {
   const alias = channelLabel(channel, state.channelMap);
   const meta = channelMeta(channel, state.channelMap);
   return `
-    <div class="channel-row" data-position="${position}">
+    <div class="channel-row" data-position="${position}" draggable="true">
+      <div class="drag-handle" title="Ziehen zum Verschieben" aria-hidden="true">↕</div>
       <div class="channel-number">${channel}</div>
       <div class="channel-main">
         <div class="channel-alias">${escapeHtml(alias)}</div>
@@ -124,12 +197,14 @@ function renderZoneEditor() {
     ? zone.channels.map((ch, pos) => channelRowHtml(ch, pos, zone.channels.length)).join('')
     : '<div class="empty-state">Diese Zone enthält keine Kanäle.</div>';
 
+  elements.deleteZone.disabled = state.zones.length <= 1;
   renderChannelSearch();
 }
 
 function renderAll() {
   renderZoneList();
   renderZoneEditor();
+  renderChangeSummary();
 }
 
 function renderChannelSearch() {
@@ -199,10 +274,88 @@ function moveChannel(position, delta) {
   renderAll();
 }
 
+function moveChannelTo(from, to) {
+  const zone = selectedZone();
+  if (!zone || from === to || from < 0 || to < 0 || from >= zone.channels.length || to >= zone.channels.length) return;
+  const [channel] = zone.channels.splice(from, 1);
+  zone.channels.splice(to, 0, channel);
+  renderAll();
+}
+
 function removeChannel(position) {
   const zone = selectedZone();
   if (!zone || position < 0 || position >= zone.channels.length) return;
   zone.channels.splice(position, 1);
+  renderAll();
+}
+
+function nextZoneSlot() {
+  const used = new Set(state.zones.map(zone => zone.index));
+  const released = state.originalZones.find(zone => !used.has(zone.index));
+  if (released) return released.index;
+  return findFreeZoneSlot(state.payload, used);
+}
+
+function createZone() {
+  if (!state.payload) return;
+  const slot = nextZoneSlot();
+  if (slot < 0) {
+    showMessage(`Kein freier Zonenslot innerhalb der ${ZONE_SCAN_SLOTS} unterstützten Slots gefunden.`, 'error');
+    return;
+  }
+
+  let suffix = state.zones.length + 1;
+  let name = `ZONE ${suffix}`;
+  const names = new Set(state.zones.map(zone => zone.name));
+  while (names.has(name)) name = `ZONE ${++suffix}`;
+
+  state.zones.push({ index: slot, name, channels: [] });
+  state.zones.sort((a, b) => a.index - b.index);
+  state.selectedZoneIndex = slot;
+  clearMessage();
+  renderAll();
+  elements.zoneName.focus();
+  elements.zoneName.select();
+}
+
+function deleteSelectedZone() {
+  const zone = selectedZone();
+  if (!zone) return;
+  if (state.zones.length <= 1) {
+    showMessage('Mindestens eine Zone muss erhalten bleiben.', 'error');
+    return;
+  }
+  if (!window.confirm(`Zone „${zone.name}“ wirklich löschen?`)) return;
+
+  const currentPosition = state.zones.findIndex(item => item.index === zone.index);
+  state.zones.splice(currentPosition, 1);
+  const next = state.zones[Math.min(currentPosition, state.zones.length - 1)] ?? state.zones[0];
+  state.selectedZoneIndex = next?.index ?? null;
+  clearMessage();
+  renderAll();
+}
+
+function validateZoneSlots() {
+  if (!state.zones.length) throw new TwError('Mindestens eine Zone muss vorhanden sein.');
+  const originalIndices = new Set(state.originalZones.map(zone => zone.index));
+  const seen = new Set();
+
+  for (const zone of state.zones) {
+    if (seen.has(zone.index)) throw new TwError(`Zonenslot ${zone.index} ist doppelt belegt.`);
+    seen.add(zone.index);
+
+    if (!originalIndices.has(zone.index) && !isZoneSlotEmpty(state.payload, zone.index)) {
+      throw new TwError(`Zonenslot ${zone.index} ist im ursprünglichen Codeplug nicht leer und kann nicht sicher neu belegt werden.`);
+    }
+  }
+}
+
+function resetChanges() {
+  if (!collectChanges().length) return;
+  if (!window.confirm('Alle Änderungen an den Zonen verwerfen?')) return;
+  state.zones = cloneZones(state.originalZones);
+  state.selectedZoneIndex = state.zones[0]?.index ?? null;
+  clearMessage();
   renderAll();
 }
 
@@ -230,12 +383,14 @@ async function loadTw(file) {
   state.fileName = file.name;
   state.payload = decoded.payload;
   state.passes = decoded.passes;
+  state.originalZones = cloneZones(decoded.zones);
   state.zones = cloneZones(decoded.zones);
   state.selectedZoneIndex = state.zones[0]?.index ?? null;
 
   elements.zoneCsvFile.disabled = false;
   elements.workspace.classList.remove('hidden');
   elements.actions.classList.remove('hidden');
+  elements.changesCard.classList.remove('hidden');
   elements.fileStatus.textContent = `${file.name} · ${decoded.passes} Decoder-Durchläufe · ${decoded.payload.length.toLocaleString('de-DE')} Byte RAW · ${decoded.zones.length} Zonen`;
   renderAll();
 }
@@ -250,16 +405,33 @@ async function loadChannels(file) {
 
 async function importZones(file) {
   if (!state.payload) return;
-  const allowed = new Set(state.zones.map(zone => zone.index));
-  const imported = parseZoneCsv(await file.text(), allowed);
+  const imported = parseZoneCsv(await file.text());
+  const originalIndices = new Set(state.originalZones.map(zone => zone.index));
 
   for (const incoming of imported) {
-    const current = state.zones.find(zone => zone.index === incoming.index);
+    if (incoming.index >= ZONE_SCAN_SLOTS) {
+      throw new CsvError(`ZoneIndex ${incoming.index} liegt außerhalb der unterstützten Zonenslots 0 bis ${ZONE_SCAN_SLOTS - 1}.`);
+    }
+
+    let current = state.zones.find(zone => zone.index === incoming.index);
+    if (!current) {
+      if (!originalIndices.has(incoming.index) && !isZoneSlotEmpty(state.payload, incoming.index)) {
+        throw new CsvError(`ZoneIndex ${incoming.index} ist im geladenen Codeplug nicht leer und kann nicht sicher neu angelegt werden.`);
+      }
+      current = { index: incoming.index, name: incoming.name, channels: [] };
+      state.zones.push(current);
+    }
+
     current.name = incoming.name;
     current.channels = [...incoming.channels];
   }
 
-  showMessage(`${imported.length} vorhandene Zonen aus ${file.name} übernommen.`, 'success');
+  state.zones.sort((a, b) => a.index - b.index);
+  if (!state.zones.some(zone => zone.index === state.selectedZoneIndex)) {
+    state.selectedZoneIndex = state.zones[0]?.index ?? null;
+  }
+
+  showMessage(`${imported.length} Zonen aus ${file.name} übernommen.`, 'success');
   renderAll();
 }
 
@@ -272,7 +444,10 @@ elements.twFile.addEventListener('change', async event => {
     console.error(error);
     elements.workspace.classList.add('hidden');
     elements.actions.classList.add('hidden');
+    elements.changesCard.classList.add('hidden');
     state.payload = null;
+    state.originalZones = [];
+    state.zones = [];
     showMessage(error instanceof TwError ? error.message : `Codeplug konnte nicht geladen werden: ${error.message}`, 'error');
     elements.fileStatus.textContent = 'Codeplug konnte nicht geladen werden.';
   }
@@ -315,6 +490,7 @@ elements.zoneName.addEventListener('input', event => {
   if (!zone) return;
   zone.name = event.target.value;
   renderZoneList();
+  renderChangeSummary();
 });
 
 elements.zoneChannels.addEventListener('click', event => {
@@ -325,6 +501,39 @@ elements.zoneChannels.addEventListener('click', event => {
   if (button.dataset.action === 'up') moveChannel(position, -1);
   if (button.dataset.action === 'down') moveChannel(position, 1);
   if (button.dataset.action === 'remove') removeChannel(position);
+});
+
+elements.zoneChannels.addEventListener('dragstart', event => {
+  const row = event.target.closest('[data-position]');
+  if (!row) return;
+  state.draggedPosition = Number.parseInt(row.dataset.position, 10);
+  row.classList.add('dragging');
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(state.draggedPosition));
+  }
+});
+
+elements.zoneChannels.addEventListener('dragover', event => {
+  const row = event.target.closest('[data-position]');
+  if (!row) return;
+  event.preventDefault();
+  elements.zoneChannels.querySelectorAll('.drag-over').forEach(item => item.classList.remove('drag-over'));
+  row.classList.add('drag-over');
+});
+
+elements.zoneChannels.addEventListener('drop', event => {
+  const row = event.target.closest('[data-position]');
+  if (!row || state.draggedPosition === null) return;
+  event.preventDefault();
+  const targetPosition = Number.parseInt(row.dataset.position, 10);
+  moveChannelTo(state.draggedPosition, targetPosition);
+  state.draggedPosition = null;
+});
+
+elements.zoneChannels.addEventListener('dragend', () => {
+  state.draggedPosition = null;
+  elements.zoneChannels.querySelectorAll('.dragging, .drag-over').forEach(item => item.classList.remove('dragging', 'drag-over'));
 });
 
 elements.channelSearch.addEventListener('input', renderChannelSearch);
@@ -339,6 +548,10 @@ elements.addChannelNumber.addEventListener('click', () => {
   elements.channelNumber.value = '';
 });
 
+elements.newZone.addEventListener('click', createZone);
+elements.deleteZone.addEventListener('click', deleteSelectedZone);
+elements.resetChanges.addEventListener('click', resetChanges);
+
 elements.exportCsv.addEventListener('click', () => {
   if (!state.zones.length) return;
   downloadBlob(zonesToCsv(state.zones, state.channelMap), 'text/csv;charset=utf-8', `${outputBaseName()}-zones.csv`);
@@ -347,7 +560,8 @@ elements.exportCsv.addEventListener('click', () => {
 elements.downloadTw.addEventListener('click', () => {
   try {
     if (!state.payload) return;
-    const editedPayload = applyZones(state.payload, state.zones);
+    validateZoneSlots();
+    const editedPayload = applyZoneChanges(state.payload, state.zones, state.originalZones);
     const tw = buildRawTw(editedPayload);
     downloadBlob(new Blob([tw], { type: 'application/octet-stream' }), 'application/octet-stream', `${outputBaseName()}-hd1-programmer.tw`);
     showMessage('TW-Datei erzeugt. Bitte jetzt in der Ailunce CPS öffnen und die Zonen prüfen, bevor du sie ins Funkgerät schreibst.', 'success');
