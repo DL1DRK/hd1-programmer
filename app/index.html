@@ -14,7 +14,10 @@
       <h1>HD1 Programmer</h1>
       <p class="subtitle">Codeplugs lokal im Browser öffnen, Zonen bearbeiten und wieder als CPS-lesbare TW-Datei speichern.</p>
     </div>
-    <div class="version-badge">v0.1.0</div>
+    <div class="header-badges">
+      <span id="dirtyBadge" class="version-badge hidden">Geändert</span>
+      <span class="version-badge">v0.2.0-dev</span>
+    </div>
   </header>
 
   <main>
@@ -40,7 +43,7 @@
         <label class="file-field">
           <span>Zonen-CSV importieren</span>
           <input id="zoneCsvFile" type="file" accept=".csv,text/csv" disabled>
-          <small>Optional. Erwartet den vom HD1 Programmer exportierten Aufbau.</small>
+          <small>Optional. Übernimmt vorhandene und freie Zonenslots.</small>
         </label>
       </div>
 
@@ -56,8 +59,11 @@
           </div>
           <span id="zoneTotal" class="counter">0</span>
         </div>
+        <div class="zone-toolbar">
+          <button id="newZone" type="button" class="secondary">+ Neue Zone</button>
+        </div>
         <div id="zoneList" class="zone-list"></div>
-        <p class="small-note">Version 0.1.0 bearbeitet vorhandene Zonen. Das Anlegen neuer Zonenslots folgt nach weiterer Formatvalidierung.</p>
+        <p class="small-note">Neue Zonen werden ausschließlich in freie oder zuvor gelöschte Zonenslots geschrieben. Andere Bereiche des Codeplugs bleiben unangetastet.</p>
       </aside>
 
       <section class="card editor-panel">
@@ -73,11 +79,12 @@
               <span>Kanäle</span>
               <strong id="zoneCount">0 / 64</strong>
             </div>
+            <button id="deleteZone" type="button" class="secondary danger">Zone löschen</button>
           </div>
 
           <div class="section-heading">
             <h3>Zugeordnete Kanäle</h3>
-            <span class="muted">Reihenfolge entspricht der Zone</span>
+            <span class="muted">Ziehen oder Pfeiltasten verwenden, um die Reihenfolge zu ändern</span>
           </div>
           <div id="zoneChannels" class="channel-list"></div>
 
@@ -102,6 +109,17 @@
           </div>
         </div>
       </section>
+    </section>
+
+    <section id="changesCard" class="card changes-card hidden">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Kontrolle</p>
+          <h2>Änderungen</h2>
+        </div>
+        <button id="resetChanges" type="button" class="secondary">Änderungen verwerfen</button>
+      </div>
+      <div id="changeSummary" class="change-summary">Keine Änderungen am geladenen Codeplug.</div>
     </section>
 
     <section id="actions" class="card actions hidden">
