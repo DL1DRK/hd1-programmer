@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.1.0'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,17 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Validate version
+      - name: Resolve version
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
           FILE_VERSION="$(tr -d '\r\n' < VERSION)"
           if [ "$VERSION" != "$FILE_VERSION" ]; then
-            echo "Tag version $VERSION does not match VERSION file $FILE_VERSION" >&2
+            echo "Release version $VERSION does not match VERSION file $FILE_VERSION" >&2
             exit 1
           fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Run tests
         run: |
@@ -35,7 +51,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
           PACKAGE="hd1-programmer-${VERSION}.zip"
 
           rm -rf dist release
@@ -68,7 +83,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
-            release/* \
-            --title "HD1 Programmer $GITHUB_REF_NAME" \
-            --generate-notes
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              release/* \
+              --title "HD1 Programmer $TAG" \
+              --generate-notes \
+              --verify-tag
+          else
+            gh release create "$TAG" \
+              release/* \
+              --target "$GITHUB_SHA" \
+              --title "HD1 Programmer $TAG" \
+              --generate-notes
+          fi
