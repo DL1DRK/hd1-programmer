@@ -1,0 +1,21 @@
+# Local IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local deployment/runtime data
+config/
+data/
+backup/
+*.log
+
+# Build output
+release/
+dist/
+*.zip
+
+# Test/user codeplugs
+*.tw
+*.csv
+!tests/fixtures/*.csv
